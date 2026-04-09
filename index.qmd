@@ -1,0 +1,397 @@
+---
+title: "Global Statistics Dashboard"
+author: "Pema Wangchuk"
+date: today
+format:
+  dashboard:
+    theme: cosmo
+    nav-buttons:
+      - icon: github
+        href: https://github.com/pemawangchuk
+    logo: ""
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(
+  tidyverse, plotly, leaflet, DT,
+  gapminder, scales, sf,
+  rnaturalearth, rnaturalearthdata, countrycode
+)
+
+# Filtered snapshot and world map (shared across all pages)
+gapminder_2007 <- gapminder %>% filter(year == 2007)
+world          <- ne_countries(scale = "medium", returnclass = "sf")
+```
+
+# Indicator 1: Life Expectancy {.tabset}
+
+## Overview
+
+```{r lifeexp-valuebox-global}
+#| content: valuebox
+#| title: "Global Average Life Expectancy (2007)"
+
+list(
+  icon = "heart-pulse",
+  color = "primary",
+  value = paste0(round(mean(gapminder_2007$lifeExp, na.rm = TRUE), 1), " yrs")
+)
+```
+
+```{r lifeexp-valuebox-highest}
+#| content: valuebox
+#| title: "Highest Life Expectancy (2007)"
+
+highest <- gapminder_2007 %>% slice_max(lifeExp, n = 1)
+list(
+  icon = "arrow-up-circle",
+  color = "success",
+  value = paste0(highest$country, ": ", round(highest$lifeExp, 1), " yrs")
+)
+```
+
+```{r lifeexp-valuebox-lowest}
+#| content: valuebox
+#| title: "Lowest Life Expectancy (2007)"
+
+lowest <- gapminder_2007 %>% slice_min(lifeExp, n = 1)
+list(
+  icon = "arrow-down-circle",
+  color = "danger",
+  value = paste0(lowest$country, ": ", round(lowest$lifeExp, 1), " yrs")
+)
+```
+
+## Charts {.tabset}
+
+### Distribution by Continent
+
+```{r lifeexp-boxplot}
+p <- gapminder_2007 %>%
+  ggplot(aes(x = reorder(continent, lifeExp, median), y = lifeExp,
+             fill = continent, text = paste0("Country: ", country,
+                                             "<br>Life Exp: ", round(lifeExp, 1)))) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Life Expectancy by Continent (2007)",
+       x = "Continent", y = "Life Expectancy (years)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplotly(p, tooltip = "text")
+```
+
+### Trend Over Time
+
+```{r lifeexp-trend}
+p2 <- gapminder %>%
+  group_by(continent, year) %>%
+  summarise(mean_lifeExp = mean(lifeExp), .groups = "drop") %>%
+  ggplot(aes(x = year, y = mean_lifeExp, color = continent,
+             text = paste0("Continent: ", continent,
+                           "<br>Year: ", year,
+                           "<br>Avg Life Exp: ", round(mean_lifeExp, 1)))) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(palette = "Set2") +
+  labs(title = "Average Life Expectancy Over Time by Continent",
+       x = "Year", y = "Average Life Expectancy (years)", color = "Continent") +
+  theme_minimal()
+
+ggplotly(p2, tooltip = "text")
+```
+
+## Map
+
+```{r lifeexp-map}
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+world_data <- world %>%
+  left_join(gapminder_2007, by = c("name_long" = "country")) %>%
+  left_join(
+    gapminder_2007 |>
+      mutate(iso_a3 = countrycode::countrycode(country, "country.name", "iso3c")),
+    by = c("iso_a3" = "iso_a3")
+  )
+
+# Simpler join via iso codes
+gapminder_iso <- gapminder_2007 %>%
+  mutate(iso_a3 = countrycode::countrycode(country, "country.name", "iso3c"))
+
+world_lifeexp <- world |>
+  left_join(gapminder_iso, by = "iso_a3")
+
+pal <- colorNumeric("YlOrRd", domain = world_lifeexp$lifeExp, na.color = "#d0d0d0")
+
+leaflet(world_lifeexp) %>%
+  addTiles() %>%
+  addPolygons(
+    fillColor = ~pal(lifeExp),
+    fillOpacity = 0.8,
+    color = "white",
+    weight = 0.5,
+    label = ~paste0(name_long, ": ", round(lifeExp, 1), " yrs"),
+    highlightOptions = highlightOptions(weight = 2, color = "#333", bringToFront = TRUE)
+  ) %>%
+  addLegend("bottomright", pal = pal, values = ~lifeExp,
+            title = "Life Expectancy (yrs)", opacity = 0.8)
+```
+
+## Data Table
+
+```{r lifeexp-table}
+gapminder_2007 %>%
+  select(Country = country, Continent = continent,
+         `Life Expectancy` = lifeExp, Population = pop, `GDP per Capita` = gdpPercap) %>%
+  mutate(
+    `Life Expectancy` = round(`Life Expectancy`, 1),
+    Population = comma(Population),
+    `GDP per Capita` = dollar(`GDP per Capita`, accuracy = 1)
+  ) %>%
+  datatable(
+    filter = "top",
+    options = list(pageLength = 15, scrollX = TRUE),
+    caption = "Life Expectancy and Economic Indicators by Country (2007)"
+  )
+```
+
+# Indicator 2: GDP per Capita {.tabset}
+
+## Overview
+
+```{r gdp-valuebox-global}
+#| content: valuebox
+#| title: "Global Median GDP per Capita (2007)"
+
+list(
+  icon = "currency-dollar",
+  color = "info",
+  value = dollar(median(gapminder_2007$gdpPercap, na.rm = TRUE), accuracy = 1)
+)
+```
+
+```{r gdp-valuebox-highest}
+#| content: valuebox
+#| title: "Highest GDP per Capita (2007)"
+
+richest <- gapminder_2007 %>% slice_max(gdpPercap, n = 1)
+list(
+  icon = "bank",
+  color = "success",
+  value = paste0(richest$country, ": ", dollar(richest$gdpPercap, accuracy = 1))
+)
+```
+
+```{r gdp-valuebox-lowest}
+#| content: valuebox
+#| title: "Lowest GDP per Capita (2007)"
+
+poorest <- gapminder_2007 %>% slice_min(gdpPercap, n = 1)
+list(
+  icon = "exclamation-triangle",
+  color = "warning",
+  value = paste0(poorest$country, ": ", dollar(poorest$gdpPercap, accuracy = 1))
+)
+```
+
+## Charts {.tabset}
+
+### Top 20 Countries
+
+```{r gdp-bar}
+p3 <- gapminder_2007 %>%
+  slice_max(gdpPercap, n = 20) %>%
+  ggplot(aes(x = reorder(country, gdpPercap), y = gdpPercap,
+             fill = continent,
+             text = paste0("Country: ", country,
+                           "<br>GDP per Capita: ", dollar(gdpPercap, accuracy = 1),
+                           "<br>Continent: ", continent))) +
+  geom_col(alpha = 0.85) +
+  coord_flip() +
+  scale_y_continuous(labels = dollar) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Top 20 Countries by GDP per Capita (2007)",
+       x = NULL, y = "GDP per Capita (USD)", fill = "Continent") +
+  theme_minimal()
+
+ggplotly(p3, tooltip = "text")
+```
+
+### Growth Over Time
+
+```{r gdp-trend}
+p4 <- gapminder %>%
+  group_by(continent, year) %>%
+  summarise(median_gdp = median(gdpPercap), .groups = "drop") %>%
+  ggplot(aes(x = year, y = median_gdp, color = continent,
+             text = paste0("Continent: ", continent,
+                           "<br>Year: ", year,
+                           "<br>Median GDP: ", dollar(median_gdp, accuracy = 1)))) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_y_continuous(labels = dollar) +
+  scale_color_brewer(palette = "Set2") +
+  labs(title = "Median GDP per Capita Over Time by Continent",
+       x = "Year", y = "Median GDP per Capita (USD)", color = "Continent") +
+  theme_minimal()
+
+ggplotly(p4, tooltip = "text")
+```
+
+## Map
+
+```{r gdp-map}
+gapminder_iso_gdp <- gapminder_2007 %>%
+  mutate(iso_a3 = countrycode::countrycode(country, "country.name", "iso3c"))
+
+world_gdp <- world %>%
+  left_join(gapminder_iso_gdp, by = "iso_a3")
+
+pal_gdp <- colorNumeric("Blues", domain = log10(world_gdp$gdpPercap + 1), na.color = "#d0d0d0")
+
+leaflet(world_gdp) %>%
+  addTiles() |>
+  addPolygons(
+    fillColor = ~pal_gdp(log10(gdpPercap + 1)),
+    fillOpacity = 0.8,
+    color = "white",
+    weight = 0.5,
+    label = ~paste0(name_long, ": ", dollar(gdpPercap, accuracy = 1)),
+    highlightOptions = highlightOptions(weight = 2, color = "#333", bringToFront = TRUE)
+  ) |>
+  addLegend("bottomright", pal = pal_gdp, values = ~log10(gdpPercap + 1),
+            title = "GDP per Capita (log scale)", opacity = 0.8)
+```
+
+## Data Table
+
+```{r gdp-table}
+gapminder_2007 %>%
+  arrange(desc(gdpPercap)) %>%
+  mutate(rank = row_number()) %>%
+  select(Rank = rank, Country = country, Continent = continent,
+         `GDP per Capita` = gdpPercap, Population = pop) |>
+  mutate(
+    `GDP per Capita` = dollar(`GDP per Capita`, accuracy = 1),
+    Population = comma(Population)
+  ) %>%
+  datatable(
+    filter = "top",
+    options = list(pageLength = 15, scrollX = TRUE),
+    caption = "GDP per Capita Rankings by Country (2007)"
+  )
+```
+
+# Relationship: Life Expectancy & GDP {.tabset}
+
+## Overview
+
+```{r rel-valuebox-correlation}
+#| content: valuebox
+#| title: "Correlation (Life Exp vs log GDP)"
+
+r <- cor(gapminder_2007$lifeExp, log(gapminder_2007$gdpPercap))
+list(
+  icon = "graph-up",
+  color = "primary",
+  value = paste0("r = ", round(r, 3))
+)
+```
+
+```{r rel-valuebox-countries}
+#| content: valuebox
+#| title: "Countries Analysed"
+
+list(
+  icon = "globe",
+  color = "info",
+  value = nrow(gapminder_2007)
+)
+```
+
+```{r rel-valuebox-continents}
+#| content: valuebox
+#| title: "Continents"
+
+list(
+  icon = "map",
+  color = "secondary",
+  value = n_distinct(gapminder_2007$continent)
+)
+```
+
+## Bubble Chart
+
+```{r bubble-chart}
+p5 <- gapminder_2007 %>%
+  ggplot(aes(x = gdpPercap, y = lifeExp,
+             size = pop, color = continent,
+             text = paste0("Country: ", country,
+                           "<br>GDP per Capita: ", dollar(gdpPercap, accuracy = 1),
+                           "<br>Life Expectancy: ", round(lifeExp, 1), " yrs",
+                           "<br>Population: ", comma(pop),
+                           "<br>Continent: ", continent))) +
+  geom_point(alpha = 0.7) +
+  scale_x_log10(labels = dollar) +
+  scale_size_continuous(range = c(2, 20), labels = comma, name = "Population") +
+  scale_color_brewer(palette = "Set2", name = "Continent") +
+  labs(title = "Life Expectancy vs GDP per Capita (2007)",
+       subtitle = "Bubble size represents population; x-axis on log scale",
+       x = "GDP per Capita (USD, log scale)",
+       y = "Life Expectancy (years)") +
+  theme_minimal()
+
+ggplotly(p5, tooltip = "text")
+```
+
+## Animated Trend (1952–2007)
+
+```{r animated-bubble}
+p6 <- gapminder %>%
+  ggplot(aes(x = gdpPercap, y = lifeExp,
+             size = pop, color = continent,
+             frame = year,
+             text = paste0("Country: ", country,
+                           "<br>GDP: ", dollar(gdpPercap, accuracy = 1),
+                           "<br>Life Exp: ", round(lifeExp, 1)))) +
+  geom_point(alpha = 0.6) +
+  scale_x_log10(labels = dollar) +
+  scale_size_continuous(range = c(2, 18), labels = comma) +
+  scale_color_brewer(palette = "Set2") +
+  labs(title = "Life Expectancy vs GDP per Capita Over Time",
+       x = "GDP per Capita (USD, log scale)",
+       y = "Life Expectancy (years)") +
+  theme_minimal()
+
+ggplotly(p6, tooltip = "text") %>%
+  animation_opts(frame = 600, easing = "linear", redraw = FALSE) |>
+  animation_slider(currentvalue = list(prefix = "Year: "))
+```
+
+## By Continent
+
+```{r facet-continent}
+p7 <- gapminder_2007 %>%
+  ggplot(aes(x = gdpPercap, y = lifeExp, color = continent,
+             text = paste0(country, "<br>GDP: ", dollar(gdpPercap, accuracy = 1),
+                           "<br>Life Exp: ", round(lifeExp, 1)))) +
+  geom_point(alpha = 0.7, size = 2.5) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.8, color = "gray40") +
+  scale_x_log10(labels = dollar) +
+  scale_color_brewer(palette = "Set2") +
+  facet_wrap(~continent, scales = "free_x") +
+  labs(title = "Life Expectancy vs GDP per Capita by Continent (2007)",
+       x = "GDP per Capita (log scale)", y = "Life Expectancy (years)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplotly(p7, tooltip = "text")
+```
